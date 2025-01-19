@@ -29,11 +29,11 @@ Detailed sketch of the display device.
 ### Communication Diagram
 This figure shows how the sensor device and display device communicate via Bluetooth. The sensor device collects data from the load cell, processes it with the microcontroller, and sends the cleanliness status wirelessly to the display device.
 
-![Communication Diagram](images/Circuit%20&%20Flow%20Diagram.jpg)  
-Diagram showing Bluetooth communication between the sensor and display devices.
+![Flow Diagram](images/Flow%20Diagram.jpg)  
+Diagram showing communication between the sensor and display devices.
 
 ### Circuit Diagram
 This detailed diagram shows how all components are physically connected. The load cell is wired to the HX711, which connects to the microcontroller. The display device includes connections between the microcontroller, motor driver, stepper motor, and LED.
 
-![Circuit Diagram](images/Circuit%20&%20Flow%20Diagram.jpg)  
+![Circuit Diagram](images/Circuit%20Diagram.jpg)  
 Detailed circuit diagram of the Smart Pet Litter Box.
