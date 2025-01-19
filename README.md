@@ -3,16 +3,8 @@
 # Project Title: Smart Cat Litter Box
 
 ## Project Overview
-The sensing device includes a dust-proof enclosure with a  
-load cell (pressure sensor) to measure waste levels, and I  
-might add an air quality sensor to detect odors like ammonia  
-to enhance its functionality. The display device uses a  
-stepper motor-driven gauge needle to visually show  
-cleanliness status (Clean, Needs Attention, Dirty), and a red  
-LED lights up when it’s time to clean.
 
-![General Sketch](images/general_sketch.png)  
-General sketch of the Smart Pet Litter Box.
+The sensing device includes a dust-proof enclosure with a load cell (pressure sensor) to measure waste levels, and I might add an air quality sensor to detect odors like ammonia to enhance its functionality. The display device uses a stepper motor-driven gauge needle to visually show cleanliness status (Clean, Needs Attention, Dirty), and a red LED lights up when it’s time to clean.
 
 ---
 
