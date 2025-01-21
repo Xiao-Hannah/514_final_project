@@ -35,5 +35,5 @@ Diagram showing communication between the sensor and display devices.
 ### Circuit Diagram
 This detailed diagram shows how all components are physically connected. The load cell is wired to the HX711, which connects to the microcontroller. The display device includes connections between the microcontroller, motor driver, stepper motor, and LED.
 
-![Circuit Diagram](images/Circuit%20Diagram.jpg)  
+![Circuit Diagram](images/Circuit.jpg)  
 Detailed circuit diagram of the Smart Pet Litter Box.
