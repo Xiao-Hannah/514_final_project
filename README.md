@@ -26,6 +26,7 @@ Detailed sketch of the display device.
 
 ## Data Sheets
 [HX711 Datasheet](datasheets/HX711.pdf)
+
 [TB6612 Motor Driver Datasheet](datasheets/TB6612%20Motor%20Driver.pdf)
 
 
