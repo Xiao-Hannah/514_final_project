@@ -31,6 +31,8 @@ Detailed sketch of the display device.
 
 [TB6612 Motor Driver Datasheet](datasheets/TB6612%20Motor%20Driver.pdf)
 
+[ESP32 Datasheet](datasheets/ESP32.pdf)
+
 
 ---
 
