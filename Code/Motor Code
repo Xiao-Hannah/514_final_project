@@ -1,0 +1,270 @@
+#include <Arduino.h>
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEScan.h>
+#include <BLEAdvertisedDevice.h>
+#include <BLEClient.h>
+
+//----------------------- Motor Related Definitions -----------------------
+#define COIL_A1 D2
+#define COIL_A2 D3
+#define COIL_B1 D0
+#define COIL_B2 D1
+
+// Stepper motor step sequence (full step mode)
+const int stepSequence[4][4] = {
+  {1, 0, 1, 0}, // Step 1
+  {0, 1, 1, 0}, // Step 2
+  {0, 1, 0, 1}, // Step 3
+  {1, 0, 0, 1}  // Step 4
+};
+
+#define TOTAL_STEPS 270
+
+// Position definitions (in steps)
+// 9 o'clock (clean), 11 o'clock (attention), 1 o'clock (clean now), 3 o'clock (maximum load)
+#define POSITION_CLEAN 0          
+#define POSITION_ATTENTION 90     
+#define POSITION_CLEAN_NOW 180    
+#define POSITION_MAX 270          
+
+// Weight thresholds (in grams)
+#define WEIGHT_CLEAN 0
+#define WEIGHT_ATTENTION 300
+#define WEIGHT_CLEAN_NOW 600
+#define WEIGHT_MAX 1000
+
+int currentPosition = 0;
+int targetPosition = 0;
+bool isCalibrated = false;
+bool motorBusy = false;  // indicates if motor is moving
+
+//----------------------- BLE Global Variables -----------------------
+volatile int latestWeight = -1;
+volatile bool newWeightAvailable = false;
+int lastProcessedWeight = -1;
+const int weightChangeThreshold = 10; // Only act on changes greater than 10g
+unsigned long lastUpdateTime = 0;
+const unsigned long updateDebounce = 1000; // 1 second debounce period
+
+//----------------------- BLE Related Definitions -----------------------
+static BLEUUID serviceUUID("f1d9563f-f861-4053-aff1-f071905fa5b9");
+static BLEUUID charUUID("efa2a95e-224e-4da2-82a3-42306fa7b44e");
+
+BLEClient* pClient = nullptr;
+BLERemoteCharacteristic* pRemoteCharacteristic = nullptr;
+
+//----------------------- Function Declarations -----------------------
+void homeMotor();
+void moveToPosition(int position);
+void setPositionByWeight(int weight);
+
+// BLE notification callback: simply store the new weight
+void notifyCallback(BLERemoteCharacteristic* pBLERemoteCharacteristic, 
+                    uint8_t* pData, size_t length, bool isNotify) {
+  String weightStr;
+  for (size_t i = 0; i < length; i++) {
+    weightStr += (char)pData[i];
+  }
+  int weight = weightStr.toInt();
+  Serial.print("Received BLE sensor weight data: ");
+  Serial.println(weight);
+  latestWeight = weight;
+  newWeightAvailable = true;
+}
+
+// Scan for and connect to the sensor
+bool connectToSensor() {
+  BLEScan* pBLEScan = BLEDevice::getScan();
+  BLEScanResults* scanResults = pBLEScan->start(5, false); // scan for 5 seconds
+  for (int i = 0; i < scanResults->getCount(); i++) {
+    BLEAdvertisedDevice device = scanResults->getDevice(i);
+    if (device.haveServiceUUID() && device.isAdvertisingService(serviceUUID)) {
+      Serial.println("Found sensor device, attempting to connect...");
+      pClient = BLEDevice::createClient();
+      if (pClient->connect(&device)) {
+         BLERemoteService* pRemoteService = pClient->getService(serviceUUID);
+         if (pRemoteService != nullptr) {
+            pRemoteCharacteristic = pRemoteService->getCharacteristic(charUUID);
+            if (pRemoteCharacteristic != nullptr && pRemoteCharacteristic->canNotify()) {
+              pRemoteCharacteristic->registerForNotify(notifyCallback);
+              Serial.println("Connected and subscribed to notifications.");
+              return true;
+            }
+         }
+         pClient->disconnect();
+      }
+    }
+  }
+  Serial.println("Failed to connect to sensor.");
+  return false;
+}
+
+//----------------------- Motor Operation Functions -----------------------
+void moveOneStep(bool direction) {
+  static int currentStep = 0;
+  int step = direction ? (3 - currentStep) : currentStep;
+  digitalWrite(COIL_A1, stepSequence[step][0]);
+  digitalWrite(COIL_A2, stepSequence[step][1]);
+  digitalWrite(COIL_B1, stepSequence[step][2]);
+  digitalWrite(COIL_B2, stepSequence[step][3]);
+  currentStep = (currentStep + 1) % 4;
+}
+
+void disableMotor() {
+  digitalWrite(COIL_A1, LOW);
+  digitalWrite(COIL_A2, LOW);
+  digitalWrite(COIL_B1, LOW);
+  digitalWrite(COIL_B2, LOW);
+}
+
+void homeMotor() {
+  Serial.println("Homing (moving to 9 o'clock position)...");
+  for (int i = 0; i < 400; i++) {
+    moveOneStep(true); // counter-clockwise direction
+    delay(5);
+  }
+  currentPosition = POSITION_CLEAN;
+  targetPosition = POSITION_CLEAN;
+  isCalibrated = true;
+  Serial.println("Homed to 9 o'clock position.");
+  disableMotor();
+}
+
+void moveToPosition(int position) {
+  if (!isCalibrated) {
+    homeMotor();
+  }
+  position = constrain(position, POSITION_CLEAN, POSITION_MAX);
+  targetPosition = position;
+  int stepsToMove = targetPosition - currentPosition;
+  bool direction = (stepsToMove < 0);
+  stepsToMove = abs(stepsToMove);
+  Serial.print("Moving from ");
+  Serial.print(currentPosition);
+  Serial.print(" to ");
+  Serial.print(targetPosition);
+  Serial.print(" (steps: ");
+  Serial.print(stepsToMove);
+  Serial.println(")");
+  for (int i = 0; i < stepsToMove; i++) {
+    moveOneStep(direction);
+    delay(5);
+  }
+  currentPosition = targetPosition;
+  disableMotor();
+}
+
+// Revised: only trigger homing if weight is really near zero, and ignore small fluctuations.
+void setPositionByWeight(int weight) {
+  // Treat weights below 10g as zero.
+  // if (weight < 10) {
+  //   if (currentPosition == POSITION_CLEAN) {
+  //     Serial.println("Already at home position; ignoring near-zero weight.");
+  //     return;
+  //   }
+  //   Serial.println("Weight is near zero, homing motor.");
+  //   homeMotor();
+  //   Serial.println("Status: Clean!");
+  //   return;
+  // }
+  
+  weight = constrain(weight, WEIGHT_CLEAN, WEIGHT_MAX);
+  int position;
+  if (weight < WEIGHT_ATTENTION) {
+    position = map(weight, WEIGHT_CLEAN, WEIGHT_ATTENTION, POSITION_CLEAN, POSITION_ATTENTION);
+    Serial.println("Status: Clean!");
+  } else if (weight < WEIGHT_CLEAN_NOW) {
+    position = map(weight, WEIGHT_ATTENTION, WEIGHT_CLEAN_NOW, POSITION_ATTENTION, POSITION_CLEAN_NOW);
+    Serial.println("Status: Needs cleaning");
+  } else {
+    position = map(weight, WEIGHT_CLEAN_NOW, WEIGHT_MAX, POSITION_CLEAN_NOW, POSITION_MAX);
+    Serial.println("Status: Clean now!");
+  }
+  if (position == currentPosition) {
+    Serial.println("Motor already at desired position.");
+    return;
+  }
+  motorBusy = true;
+  moveToPosition(position);
+  motorBusy = false;
+}
+
+//----------------------- setup() -----------------------
+void setup() {
+  pinMode(COIL_A1, OUTPUT);
+  pinMode(COIL_A2, OUTPUT);
+  pinMode(COIL_B1, OUTPUT);
+  pinMode(COIL_B2, OUTPUT);
+  
+  Serial.begin(115200);
+  Serial.println("Smart Litter Box Motor Controller Starting");
+  Serial.println("Commands: H, W:xxx, P:xxx, 1,2,3,4");
+  
+  BLEDevice::init("MotorClient");
+  if (!connectToSensor()) {
+    Serial.println("Failed to connect to BLE sensor. Please ensure it is powered on.");
+  }
+  
+  // Home the motor at startup.
+  homeMotor();
+}
+
+//----------------------- loop() -----------------------
+void loop() {
+  // Process serial commands as before.
+  if (Serial.available() > 0) {
+    char cmd = Serial.read();
+    if (cmd == 'H' || cmd == 'h') {
+      homeMotor();
+    } else if (cmd == 'W' || cmd == 'w') {
+      if (Serial.read() == ':') {
+        int weight = Serial.parseInt();
+        Serial.print("Input weight: ");
+        Serial.print(weight);
+        Serial.println(" g");
+        setPositionByWeight(weight);
+      }
+    } else if (cmd == 'P' || cmd == 'p') {
+      if (Serial.read() == ':') {
+        int pos = Serial.parseInt();
+        moveToPosition(pos);
+        Serial.print("Moved to custom position: ");
+        Serial.println(pos);
+      }
+    } else if (cmd == '1') {
+      moveToPosition(POSITION_CLEAN);
+      Serial.println("Position: 9 o'clock (Clean)");
+    } else if (cmd == '2') {
+      moveToPosition(POSITION_ATTENTION);
+      Serial.println("Position: 11 o'clock (Attention)");
+    } else if (cmd == '3') {
+      moveToPosition(POSITION_CLEAN_NOW);
+      Serial.println("Position: 1 o'clock (Clean Now)");
+    } else if (cmd == '4') {
+      moveToPosition(POSITION_MAX);
+      Serial.println("Position: 3 o'clock (Maximum Load)");
+    }
+    while (Serial.available()) Serial.read();
+  }
+  
+  // Process BLE weight notifications with debounce.
+  if (newWeightAvailable && !motorBusy) {
+    // Only act if the change is significant or a debounce period has passed.
+    if (abs(latestWeight - lastProcessedWeight) >= weightChangeThreshold ||
+        (millis() - lastUpdateTime) > updateDebounce) {
+      lastProcessedWeight = latestWeight;
+      lastUpdateTime = millis();
+      setPositionByWeight(latestWeight);
+    }
+    newWeightAvailable = false;
+  }
+  
+  // If BLE disconnects, try reconnecting.
+  if (!pClient || !pClient->isConnected()) {
+    Serial.println("Rescanning and connecting to sensor...");
+    connectToSensor();
+  }
+  
+  delay(100);
+}
